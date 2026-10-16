@@ -15,6 +15,9 @@ type Config struct {
 	DBPassword string
 	DBName     string
 	APIKEY     string
+	WhatsAppURL string
+	WhatsAppAPIKEY string
+	WhatsAppInstance string
 }
 
 func Load() (*Config, error) {
@@ -30,6 +33,9 @@ func Load() (*Config, error) {
 		DBPassword: getEnv("DB_PASSWORD", ""),
 		DBName:     getEnv("DB_NAME", ""),
 		APIKEY:     getEnv("API_KEY", ""),
+		WhatsAppURL: getEnv("WHATSAPP_URL", ""),
+		WhatsAppAPIKEY: getEnv("WHATSAPP_API_KEY", ""),
+		WhatsAppInstance: getEnv("WHATSAPP_INSTANCE", ""),
 	}
 
 	if cfg.DBUser == "" || cfg.DBPassword == "" {

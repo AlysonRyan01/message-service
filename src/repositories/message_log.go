@@ -78,15 +78,89 @@ func (r *MessageLogRepository) Update(ctx context.Context, m *models.MessageLog)
 	return nil
 }
 
+func (r *MessageLogRepository) IncrementAttempts(ctx context.Context, messageLogID string, lastError string) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE message_log
+		SET attempts = attempts + 1,
+		    last_error = $1
+		WHERE message_log_id = $2`,
+		lastError, messageLogID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to increment attempts for message log %s: %w", messageLogID, err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to read rows affected for message log %s: %w", messageLogID, err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("message log %s: %w", messageLogID, "message log not found")
+	}
+
+	return nil
+}
+
+func (r *MessageLogRepository) MarkSent(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE message_log
+		SET message_log_status_id = $1,
+		    sent_at = NOW()
+		WHERE message_log_id = $2`,
+		models.StatusSent, id,
+	)
+	return err
+}
+
+func (r *MessageLogRepository) MarkFailed(ctx context.Context, id string, errMsg string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE message_log
+		SET message_log_status_id = $1,
+		    attempts = attempts + 1,
+		    last_error = $2
+		WHERE message_log_id = $3`,
+		models.StatusFailed, errMsg, id,
+	)
+	return err
+}
+
+func (r *MessageLogRepository) Delete(ctx context.Context, messageLogID string) error {
+	result, err := r.db.ExecContext(ctx, `
+		DELETE FROM message_log WHERE message_log_id = $1`,
+		messageLogID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to delete message log %s: %w", messageLogID, err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected for message log %s: %w", messageLogID, err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("message log %s: %w", messageLogID, "message log not found")
+	}
+
+	return nil
+}
+
 func (r *MessageLogRepository) FetchPending(ctx context.Context) ([]models.PendingMessage, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.QueryContext(ctx, `
 		SELECT l.message_log_id, m.message_type_id, m.service_order_id,
 		       m.phone, m.payload, l.attempts
 		FROM message_log l
 		JOIN message m ON m.message_log_id = l.message_log_id
 		WHERE l.message_log_status_id = $1
 		ORDER BY l.created_at
-		LIMIT 10`,
+		LIMIT 10
+		FOR UPDATE OF 1 SKIP LOCKED`,
 		models.StatusPending,
 	)
 	if err != nil {
@@ -95,6 +169,7 @@ func (r *MessageLogRepository) FetchPending(ctx context.Context) ([]models.Pendi
 	defer rows.Close()
 
 	var messages []models.PendingMessage
+	var ids []string
 
 	for rows.Next() {
 		var msg models.PendingMessage
@@ -111,10 +186,27 @@ func (r *MessageLogRepository) FetchPending(ctx context.Context) ([]models.Pendi
 		}
 
 		messages = append(messages, msg)
+		ids = append(ids, msg.MessageLogID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to iterate pending messages: %w", err)
 	}
+	rows.Close()
+
+	_, err = tx.ExecContext(ctx, `
+		UPDATE message_log
+		SET message_log_status_id = $1
+		WHERE message_log_id = ANY($2)`,
+		models.StatusProcessing, pq.Array(ids),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to mark as processing: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("failed to commit: %w", err)
+	}
+
 
 	return messages, nil
 }
