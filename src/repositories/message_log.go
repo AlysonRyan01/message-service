@@ -53,31 +53,6 @@ func (r *MessageLogRepository) Create(ctx context.Context, m *models.Message) (s
 	return messageLogID, nil
 }
 
-func (r *MessageLogRepository) Update(ctx context.Context, m *models.MessageLog) error {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE message_log
-		SET message_log_status_id = $1,
-		    attempts = $2,
-		    last_error = $3,
-		    sent_at = $4
-		WHERE message_log_id = $5`,
-		m.MessageLogStatusID, m.Attempts, m.LastError, m.SentAt, m.MessageLogID,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update message log: %w", err)
-	}
-
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to read rows affected: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("message log %s not found", m.MessageLogID)
-	}
-
-	return nil
-}
-
 func (r *MessageLogRepository) IncrementAttempts(ctx context.Context, messageLogID string, lastError string) error {
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE message_log
@@ -211,16 +186,16 @@ func (r *MessageLogRepository) FetchPending(ctx context.Context) ([]models.Pendi
 	return messages, nil
 }
 
-func (r *MessageLogRepository) Requeue(ctx context.Context, ids []string) (int64, error) {
-	result, err := r.db.ExecContext(ctx, `
+func (r *MessageLogRepository) Requeue(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `
 		UPDATE message_log
 		SET message_log_status_id = $1, attempts = 0, last_error = NULL
 		WHERE message_log_status_id = $2
-		  AND message_log_id = ANY($3)`,
-		models.StatusPending, models.StatusFailed, pq.Array(ids),
+		AND message_log_id = $3`,
+		models.StatusPending, models.StatusFailed, id,
 	)
 	if err != nil {
-		return 0, fmt.Errorf("failed to requeue messages: %w", err)
+		return fmt.Errorf("failed to requeue messages: %w", err)
 	}
-	return result.RowsAffected()
+	return nil
 }

@@ -1,11 +1,13 @@
 package handlers
 
-type Handlers struct {
+import "github.com/alysonryan/message-service/services"
 
+type Handlers struct {
+	messageLog *MessageLogHandler
 }
 
-func NewHandlersInstance() *Handlers {
+func NewHandlersInstance(s services.Services) *Handlers {
 	return &Handlers{
-		
+		messageLog: NewMessageLogHandler(s.MessageLog),
 	}
 }

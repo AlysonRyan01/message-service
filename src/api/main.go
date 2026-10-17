@@ -44,7 +44,7 @@ func run() error {
 	defer conn.Close()
 
 	repos := repositories.NewRepositoriesInstance(conn)
-	svcs := services.NewServicesInstance(cfg)
+	svcs := services.NewServicesInstance(cfg, repos)
 
 	queue := make(chan models.PendingMessage, 100)
 
